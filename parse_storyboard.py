@@ -1,12 +1,18 @@
 #!/usr/bin/env python
 
+# https://www.datacamp.com/community/tutorials/python-xml-elementtree
+# https://joris.kluivers.nl/blog/2014/02/10/storyboard-identifier-constants/
+
 import sys, os
 import xml.etree.ElementTree as et
 from argparse import ArgumentParser
 import json
 
-def dump(dict, key):
-    return f'    {key}: {dict[key]}'
+def dump(dict, keys):
+    strs = []
+    for key in keys:
+        strs.append(f'    {key}: {dict[key]}')
+    return '  '.join(strs)
 
 class StoryboardParser(object):
 
@@ -23,9 +29,16 @@ class StoryboardParser(object):
         strs = []
         #strs.append(json.dumps(self.root.tag))
         #strs.append(json.dumps(self.root.attrib))
-        strs.append(dump(self.root.attrib, "initialViewController"))
+        strs.append(dump(self.root.attrib, ['initialViewController']))
         return "\n".join(strs)
-        #return json.dumps(self.root.tag)
+
+    def viewControllers_info(self):
+        strs = []
+        for vc in self.root.iter('viewController'):
+            #strs.append(json.dumps(vc.attrib))
+            strs.append(dump(vc.attrib, ['id', 'customClass']))
+        return "\n".join(strs)
+
 
 PREFIX = ""
 
@@ -156,3 +169,4 @@ if __name__ == "__main__":
     sb = StoryboardParser(args.filepath)
 
     print(sb.root_info())
+    print(sb.viewControllers_info())
