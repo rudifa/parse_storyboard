@@ -8,12 +8,30 @@ import xml.etree.ElementTree as et
 from argparse import ArgumentParser
 import json
 
+def graph():
+    from graphviz import Digraph, Source
+
+    dot = Digraph(comment='The Round Table')
+    dot.node('A', 'King Arthur')
+    dot.node('B', 'Sir Bedevere the Wise')
+    dot.node('L', 'Sir Lancelot the Brave')
+
+    dot.edges(['AB', 'AL'])
+    dot.edge('B', 'L')
+    dot.format = 'png'
+    print(dot.source)
+    dot.render('graphviz-out/graphviz', view=True)
+
+
 def dump(dict, keys):
     strs = []
     for key in keys:
         if key in dict:
             strs.append(f'    {key}: {dict[key]}')
     return '  '.join(strs)
+
+# filtered_dictionary = {key: value for key, value in a_dictionary.items() if key > 1}
+
 
 class StoryboardParser(object):
 
@@ -54,6 +72,34 @@ class StoryboardParser(object):
             strs.append(json.dumps(segue.attrib))
         #return "\n".join(strs)
         return ''
+
+    ##########################
+
+    def node_from(self, vc):
+        node = { 'id': vc.attrib['id'],
+                'customClass': vc.attrib['customClass']
+        }
+        return node
+
+    def edge_from(self, vc, segue):
+        edge = { 'id': segue.attrib['id'],
+                'source': vc.attrib['customClass'],
+                'destination': segue.attrib['destination'],
+        }
+        return edge
+
+    def nodes_and_edges(self):
+        """
+        Returns nodes (view controllers) and edges (segues)
+        """
+        nodes = []
+        edges = []
+        for vc in self.root.iter('viewController'):
+            nodes.append(self.node_from(vc))
+            for segue in vc.iter('segue'):
+                edges.append(self.edge_from(vc, segue))
+        return {'nodes': nodes, 'edges': edges}
+
 
 PREFIX = ""
 
@@ -186,3 +232,6 @@ if __name__ == "__main__":
     print(sb.root_info())
     print(sb.viewControllers_info())
     print(sb.segue_info())
+
+    #graph()
+    print(sb.nodes_and_edges())
