@@ -11,7 +11,8 @@ import json
 def dump(dict, keys):
     strs = []
     for key in keys:
-        strs.append(f'    {key}: {dict[key]}')
+        if key in dict:
+            strs.append(f'    {key}: {dict[key]}')
     return '  '.join(strs)
 
 class StoryboardParser(object):
@@ -36,9 +37,23 @@ class StoryboardParser(object):
         strs = []
         for vc in self.root.iter('viewController'):
             #strs.append(json.dumps(vc.attrib))
+            strs.append('')
             strs.append(dump(vc.attrib, ['id', 'customClass']))
+            for segue in vc.iter('segue'):
+                #     print(segue)
+                strs.append('        segue ' + dump(segue.attrib, ['id', 'destination', 'kind', 'identifier', 'unwindAction', 'modalPresentationStyle',  'modalTransitionStyle']))
+
+                #{"destination": "aZf-qq-fub", "kind": "presentation", "identifier": "toStickerShopVC", "modalPresentationStyle": "fullScreen", "modalTransitionStyle": "crossDissolve", "id": "Dde-ZG-iRW"}
         return "\n".join(strs)
 
+    def segue_info(self):
+        strs = ['??']
+        for segue in self.root.iter("segue"):
+            segueIdentifier = segue.get("identifier")
+            #strs.append(segue.tostring())
+            strs.append(json.dumps(segue.attrib))
+        #return "\n".join(strs)
+        return ''
 
 PREFIX = ""
 
@@ -170,3 +185,4 @@ if __name__ == "__main__":
 
     print(sb.root_info())
     print(sb.viewControllers_info())
+    print(sb.segue_info())
