@@ -3,6 +3,29 @@
 import sys, os
 import xml.etree.ElementTree as et
 from argparse import ArgumentParser
+import json
+
+def dump(dict, key):
+    return f'    {key}: {dict[key]}'
+
+class StoryboardParser(object):
+
+    def __init__(self, filepath):
+        """Given a filepath to an Xcode .storyboatd file
+        initialize the instance parsing the file.
+        """
+        self.filepath = filepath
+
+        self.tree = et.parse(filepath)
+        self.root = self.tree.getroot()
+
+    def root_info(self):
+        strs = []
+        #strs.append(json.dumps(self.root.tag))
+        #strs.append(json.dumps(self.root.attrib))
+        strs.append(dump(self.root.attrib, "initialViewController"))
+        return "\n".join(strs)
+        #return json.dumps(self.root.tag)
 
 PREFIX = ""
 
@@ -126,6 +149,10 @@ if __name__ == "__main__":
     # print("segueIdentifiers=", segueIdentifiers)
     # print("reuseIdentifiers=", reuseIdentifiers)
 
-    print_dict("controllerIdentifiers", controllerIdentifiers)
-    print_dict("segueIdentifiers", segueIdentifiers)
-    print_dict("reuseIdentifiers", reuseIdentifiers)
+    # print_dict("controllerIdentifiers", controllerIdentifiers)
+    # print_dict("segueIdentifiers", segueIdentifiers)
+    # print_dict("reuseIdentifiers", reuseIdentifiers)
+
+    sb = StoryboardParser(args.filepath)
+
+    print(sb.root_info())
