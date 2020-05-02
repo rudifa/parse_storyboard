@@ -7,8 +7,9 @@ import sys, os
 import xml.etree.ElementTree as et
 from argparse import ArgumentParser
 import json
+from levenshtein_distance import find_nearest
 
-def graph():
+def graph_demo():
     from graphviz import Digraph, Source
 
     dot = Digraph(comment='The Round Table')
@@ -18,6 +19,21 @@ def graph():
 
     dot.edges(['AB', 'AL'])
     dot.edge('B', 'L')
+    dot.format = 'png'
+    print(dot.source)
+    dot.render('graphviz-out/graphviz', view=True)
+
+
+def graph_from(nodes, edges):
+    from graphviz import Digraph, Source
+
+    dot = Digraph(comment='storyboard')
+    for node in nodes:
+        dot.node(node['id'], node['customClass'])
+
+    for edge in edges:
+        dot.edge(edge['source'], edge['destination'])
+
     dot.format = 'png'
     print(dot.source)
     dot.render('graphviz-out/graphviz', view=True)
@@ -83,7 +99,7 @@ class StoryboardParser(object):
 
     def edge_from(self, vc, segue):
         edge = { 'id': segue.attrib['id'],
-                'source': vc.attrib['customClass'],
+                'source': vc.attrib['id'],
                 'destination': segue.attrib['destination'],
         }
         return edge
@@ -234,4 +250,10 @@ if __name__ == "__main__":
     print(sb.segue_info())
 
     #graph()
-    print(sb.nodes_and_edges())
+    #print(sb.nodes_and_edges())
+
+    ne = sb.nodes_and_edges()
+    print('nodes:', ne['nodes'])
+    print('edges:', ne['edges'])
+
+    graph_from(ne['nodes'], ne['edges'])
