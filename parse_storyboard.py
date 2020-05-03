@@ -7,47 +7,8 @@ import sys, os
 import xml.etree.ElementTree as et
 from argparse import ArgumentParser
 import json
+import re
 from levenshtein_distance import find_nearest
-
-def graph_demo():
-    from graphviz import Digraph, Source
-
-    dot = Digraph(comment='The Round Table')
-    dot.node('A', 'King Arthur')
-    dot.node('B', 'Sir Bedevere the Wise')
-    dot.node('L', 'Sir Lancelot the Brave')
-
-    dot.edges(['AB', 'AL'])
-    dot.edge('B', 'L')
-    dot.format = 'png'
-    print(dot.source)
-    dot.render('graphviz-out/graphviz', view=True)
-
-
-def graph_from(nodes, edges):
-    from graphviz import Digraph, Source
-
-    dot = Digraph(comment='storyboard')
-    for node in nodes:
-        dot.node(node['id'], node['customClass'])
-
-    for edge in edges:
-        dot.edge(edge['source'], edge['destination'])
-
-    dot.format = 'png'
-    print(dot.source)
-    dot.render('graphviz-out/graphviz', view=True)
-
-
-def dump(dict, keys):
-    strs = []
-    for key in keys:
-        if key in dict:
-            strs.append(f'    {key}: {dict[key]}')
-    return '  '.join(strs)
-
-# filtered_dictionary = {key: value for key, value in a_dictionary.items() if key > 1}
-
 
 class StoryboardParser(object):
 
@@ -56,27 +17,179 @@ class StoryboardParser(object):
         initialize the instance parsing the file.
         """
         self.filepath = filepath
+        self.dir = re.split(r'\/', filepath)[0]
 
         self.tree = et.parse(filepath)
         self.root = self.tree.getroot()
+
+        self.vc_nodes = self.collect_vc_nodes()
+        self.vc_nodes += self.collect_navc_nodes()
+        self.segue_edges = self.collect_segue_edges()
+        self.unwind_edges = self.collect_unwind_edges()
+
+        # TODO 
+        # regroup navigationControllers and viewControllers in controller_nodes
+        # regroup relationship, presentation and navigation segues in segue_edges
+
+    ##########################
+
+    def digraph(self):
+        from graphviz import Digraph, Source
+        # https://graphviz.readthedocs.io/en/stable/api.html
+
+        dot = Digraph(name='storyboard')
+        dot.attr('node', shape='rect', fontname = 'courier', fontsize = '12')
+        dot.attr('edge', fontname = 'courier', fontsize = '10')
+
+        dot.node('', self.dir, shape='none')
+        dot.edge('', self.initial_vc_class_name())
+
+        for node in self.vc_nodes:
+            dot.node(node['viewController'])
+
+        for edge in self.segue_edges:
+            dot.edge(edge['source'], edge['destination'], color='blue', label=edge['identifier'])
+
+        for edge in self.unwind_edges:
+            dot.edge(edge['source'], edge['destination'], color='red', label=edge['identifier'])
+
+        dot.format = 'png'
+        #print(dot.source)
+        dot.render('graphviz-out/graphviz', view=True)
+        return dot.source
+
+    def collect_vc_nodes(self):
+        """
+        Return nodes representing view controllers
+        """
+        nodes = []
+        for vc in self.root.iter('viewController'):
+            nodes.append(self.vc_node(vc))
+        return nodes
+
+    def vc_node(self, vc):
+        node = { 'id': vc.attrib['id'],
+                'viewController': vc.attrib['customClass']
+        }
+        return node
+
+    def collect_navc_nodes(self):
+        """
+        Return nodes representing navigation controllers
+        """
+        nodes = []
+        for vc in self.root.iter('navigationController'):
+            nodes.append(self.navc_node(vc))
+        return nodes
+
+    def navc_node(self, vc):
+        node = { 'id': vc.attrib['id'],
+                'viewController': 'navigationController' + '-' + vc.attrib['id']
+        }
+        return node
+
+    def initial_vc_class_name(self):
+        initial_vc_id = self.root.attrib['initialViewController']
+        vc_class_name_dict = {vc_node['id']: vc_node['viewController'] for vc_node in self.vc_nodes}
+        return vc_class_name_dict.get(initial_vc_id, 'UNKNOWN')
+
+    def collect_segue_edges(self):
+        """
+        Return edges representing segues
+        """
+        vc_class_name_dict = {vc_node['id']: vc_node['viewController'] for vc_node in self.vc_nodes}
+        edges = []
+        for vc in self.root.iter('viewController'):
+            for segue in vc.iter('segue'):
+                edge = self.segue_edge(vc_class_name_dict, vc, segue)
+                if (edge):
+                    edges.append(edge)
+        return edges
+
+    def segue_edge(self, vc_class_name_dict, vc, segue):
+        if segue.attrib['kind'] == 'presentation':
+            dest_vc_id = segue.attrib['destination']
+            dest_vc_class_name = vc_class_name_dict[dest_vc_id]
+            return { 'id': segue.attrib['id'],
+                    'source': vc.attrib['customClass'],
+                    'destination': dest_vc_class_name,
+                    'identifier': segue.attrib['identifier'],
+            }
+        return None 
+
+    def collect_relationship_segue_edges(self):
+        """
+        Return edges representing segues
+        """
+        # TODO
+
+
+    def relationship_segue_edge(self, vc_class_name_dict, vc, segue):
+        if segue.attrib['kind'] == 'relationship':
+            dest_vc_id = segue.attrib['destination']
+            dest_vc_class_name = vc_class_name_dict[dest_vc_id]
+            return { 'id': segue.attrib['id'],
+                    'source': vc.attrib['customClass'],
+                    'destination': dest_vc_class_name,
+                    'identifier': segue.attrib['identifier'],
+            }
+        return None 
+
+    def collect_unwind_edges(self):
+        """
+        Return edges representing unwind segues
+        """
+        vc_class_names = [vc_node['viewController'] for vc_node in self.vc_nodes]
+        edges = []
+        for vc in self.root.iter('viewController'):
+            for segue in vc.iter('segue'):
+                edge = self.unwind_edge(vc_class_names, vc, segue)
+                if (edge):
+                    edges.append(edge)
+        return edges
+
+    def unwind_edge(self, vc_class_names, vc, segue):
+        if (segue.attrib['kind'] == 'unwind'):
+            identifier = segue.attrib['identifier'] # ends in 'VC'
+            identifier_full = identifier.replace('VC', 'ViewController')
+            dest_vc_class_name = find_nearest(identifier_full, vc_class_names)
+            return { 'id': segue.attrib['id'],
+                    'source': vc.attrib['customClass'],
+                    'destination': dest_vc_class_name,
+                    'identifier': identifier,
+            }
+        return None 
+
+    ### preliminary investigation
 
     def root_info(self):
         strs = []
         #strs.append(json.dumps(self.root.tag))
         #strs.append(json.dumps(self.root.attrib))
-        strs.append(dump(self.root.attrib, ['initialViewController']))
+        strs.append(self.dump(self.root.attrib, ['initialViewController']))
+        return "\n".join(strs)
+
+    def navigationControllers_info(self):
+        strs = []
+        for vc in self.root.iter('navigationController'):
+            strs.append(json.dumps(vc.attrib))
+            strs.append('')
+            #strs.append(self.dump(vc.attrib, ['id']))
+            for segue in vc.iter('segue'):
+                #     print(segue)
+                strs.append('        segue ' + self.dump(segue.attrib, ['id', 'destination', 'kind', 'identifier', 'unwindAction', 'modalPresentationStyle',  'modalTransitionStyle']))
+                #{"destination": "aZf-qq-fub", "kind": "presentation", "identifier": "toStickerShopVC", "modalPresentationStyle": "fullScreen", "modalTransitionStyle": "crossDissolve", "id": "Dde-ZG-iRW"}
         return "\n".join(strs)
 
     def viewControllers_info(self):
         strs = []
         for vc in self.root.iter('viewController'):
-            #strs.append(json.dumps(vc.attrib))
+            strs.append(json.dumps(vc.attrib))
             strs.append('')
-            strs.append(dump(vc.attrib, ['id', 'customClass']))
+            #strs.append(self.dump(vc.attrib, ['id', 'customClass']))
             for segue in vc.iter('segue'):
                 #     print(segue)
-                strs.append('        segue ' + dump(segue.attrib, ['id', 'destination', 'kind', 'identifier', 'unwindAction', 'modalPresentationStyle',  'modalTransitionStyle']))
-
+                strs.append('        segue ' + self.dump(segue.attrib, ['id', 'destination', 'kind', 'identifier', 'unwindAction', 'modalPresentationStyle',  'modalTransitionStyle']))
                 #{"destination": "aZf-qq-fub", "kind": "presentation", "identifier": "toStickerShopVC", "modalPresentationStyle": "fullScreen", "modalTransitionStyle": "crossDissolve", "id": "Dde-ZG-iRW"}
         return "\n".join(strs)
 
@@ -89,21 +202,6 @@ class StoryboardParser(object):
         #return "\n".join(strs)
         return ''
 
-    ##########################
-
-    def node_from(self, vc):
-        node = { 'id': vc.attrib['id'],
-                'customClass': vc.attrib['customClass']
-        }
-        return node
-
-    def edge_from(self, vc, segue):
-        edge = { 'id': segue.attrib['id'],
-                'source': vc.attrib['id'],
-                'destination': segue.attrib['destination'],
-        }
-        return edge
-
     def nodes_and_edges(self):
         """
         Returns nodes (view controllers) and edges (segues)
@@ -111,149 +209,61 @@ class StoryboardParser(object):
         nodes = []
         edges = []
         for vc in self.root.iter('viewController'):
-            nodes.append(self.node_from(vc))
+            nodes.append(self.any_vc_node(vc))
             for segue in vc.iter('segue'):
-                edges.append(self.edge_from(vc, segue))
+                edges.append(self.any_segue_edge(vc, segue))
         return {'nodes': nodes, 'edges': edges}
 
+    def any_vc_node(self, vc):
+        node = { 'id': vc.attrib['id'],
+                'viewController': vc.attrib['customClass']
+        }
+        return node
 
-PREFIX = ""
-
-segueIdentifiers = {}
-controllerIdentifiers = {}
-reuseIdentifiers = {}
-
-def addSegueIdentifier(identifier):
-    key = identifier[0].upper() + identifier[1:]
-    if not key.startswith(PREFIX.upper()):
-        key = PREFIX.upper() + key
-
-    segueIdentifiers[key] = identifier
-
-def addControllerIdentifier(identifier):
-    key = identifier[0].upper() + identifier[1:]
-    if not key.startswith(PREFIX.upper()):
-        key = PREFIX.upper() + key
-
-    controllerIdentifiers[key] = identifier
-
-def addReuseIdentifier(identifier):
-  key = identifier[0].upper() + identifier[1:]
-  if not key.startswith(PREFIX.upper()):
-    key = PREFIX.upper() + key
-
-  reuseIdentifiers[key] = identifier
-
-def process_storyboard(file):
-    tree = et.parse(file)
-    root = tree.getroot()
-
-    for segue in root.iter("segue"):
-        segueIdentifier = segue.get("identifier")
-        if segueIdentifier == None:
-            continue
-        addSegueIdentifier(segueIdentifier)
-
-    for controller in root.findall(".//*[@storyboardIdentifier]"):
-        controllerIdentifier = controller.get("storyboardIdentifier")
-        if controllerIdentifier == None:
-            continue
-        addControllerIdentifier(controllerIdentifier)
-
-    for cell in root.findall(".//*[@reuseIdentifier]"):
-      reuseIdentifier = cell.get("reuseIdentifier")
-      if reuseIdentifier == None:
-        continue
-      addReuseIdentifier(reuseIdentifier)
-
-def writeHeader(file, identifiers):
-    constants = sorted(identifiers.keys())
-
-    for constantName in constants:
-        file.write("extern NSString * const " + constantName + ";\n")
-
-def writeImplementation(file, identifiers):
-    constants = sorted(identifiers.keys())
-
-    for constantName in constants:
-        file.write("NSString * const " + constantName + " = @\"" + identifiers[constantName] + "\";\n")
+    def any_segue_edge(self, vc, segue):
+        edge = { 'id': segue.attrib['id'],
+                'source': vc.attrib['id'],
+                'destination': segue.attrib['destination'],
+        }
+        return edge
 
 
-def doit():
+    def dump(self, dict, keys):
+        strs = []
+        for key in keys:
+            if key in dict:
+                strs.append(f'    {key}: {dict[key]}')
+        return '  '.join(strs)
 
-    count = os.environ["SCRIPT_INPUT_FILE_COUNT"]
-    for n in range(int(count)):
-        process_storyboard(os.environ["SCRIPT_INPUT_FILE_" + str(n)])
+def print_detail_info(sb):
 
-    with open(sys.argv[1], "w+") as header:
-        header.write("/* Generated document. DO NOT CHANGE */\n\n")
-        header.write("/* Segue identifier constants */\n")
-        header.write("@class NSString;\n\n")
-        writeHeader(header, segueIdentifiers)
+    def print_list(list_name, list):
+        print(f'{list_name}:')
+        for item in list:
+            print(' ', item)   
 
-        header.write("\n")
-        header.write("/* Controller identifier constants */\n")
+    print('root_info:', sb.root_info())
+    print('navigationControllers_info:', sb.navigationControllers_info())
+    print('viewControllers_info:', sb.viewControllers_info())
+    print('segue_info:', sb.segue_info())
 
-        writeHeader(header, controllerIdentifiers)
+    ne = sb.nodes_and_edges()
 
-        header.write("\n")
-        header.write("/* Reuse identifier constants */\n")
+    print_list('nodes', ne['nodes'])
+    print_list('edges', ne['edges'])
 
-        writeHeader(header, reuseIdentifiers)
-
-        header.close()
-
-    with open(sys.argv[2], "w+") as implementation:
-        implementation.write("/* Generated document. DO NOT CHANGE */\n\n")
-        implementation.write("#import <Foundation/Foundation.h>\n\n")
-        writeImplementation(implementation, segueIdentifiers)
-        implementation.write("\n")
-
-        writeImplementation(implementation, controllerIdentifiers)
-        implementation.write("\n")
-
-        writeImplementation(implementation, reuseIdentifiers)
-        implementation.write("\n")
-
-        implementation.close()
-
-def print_dict(name, dict):
-    print(name, ":")
-    for key, value in dict.items():
-        print("    ", key, value)
-
+    print_list('vc_nodes', sb.vc_nodes)
+    print_list('segue_edges', sb.segue_edges)
+    print_list('unwind_edges', sb.unwind_edges)
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("filepath", type=str, default=None)
-    # parser.add_argument("-d", default=',')
-    # parser.add_argument("-w", default=150, type=int)
     args = parser.parse_args()
-
     print("args.filepath=", args.filepath)
-    # print("args.d=", args.d)
-    # print("args.w=", args.w)
-
-    process_storyboard(args.filepath)
-
-    # print("controllerIdentifiers=", controllerIdentifiers)
-    # print("segueIdentifiers=", segueIdentifiers)
-    # print("reuseIdentifiers=", reuseIdentifiers)
-
-    # print_dict("controllerIdentifiers", controllerIdentifiers)
-    # print_dict("segueIdentifiers", segueIdentifiers)
-    # print_dict("reuseIdentifiers", reuseIdentifiers)
 
     sb = StoryboardParser(args.filepath)
+    print_detail_info(sb)
+    ds = sb.digraph()
+    print(ds)
 
-    print(sb.root_info())
-    print(sb.viewControllers_info())
-    print(sb.segue_info())
 
-    #graph()
-    #print(sb.nodes_and_edges())
-
-    ne = sb.nodes_and_edges()
-    print('nodes:', ne['nodes'])
-    print('edges:', ne['edges'])
-
-    graph_from(ne['nodes'], ne['edges'])
