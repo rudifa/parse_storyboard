@@ -22,14 +22,11 @@ class StoryboardParser(object):
         self.tree = et.parse(filepath)
         self.root = self.tree.getroot()
 
-        self.vc_nodes = self.collect_vc_nodes()
-        self.vc_nodes += self.collect_navc_nodes()
-        self.segue_edges = self.collect_segue_edges()
-        self.unwind_edges = self.collect_unwind_edges()
+        self.controller_nodes = self.collect_controller_nodes()
+        self.controller_name_dict = {node['id']: node['controller_name'] for node in self.controller_nodes}
 
-        # TODO 
-        # regroup navigationControllers and viewControllers in controller_nodes
-        # regroup relationship, presentation and navigation segues in segue_edges
+        self.segue_edges = self.collect_segue_edges()
+        self.unwind_edges = [] #self.collect_unwind_edges()
 
     ##########################
 
@@ -44,72 +41,101 @@ class StoryboardParser(object):
         dot.node('', self.dir, shape='none')
         dot.edge('', self.initial_vc_class_name())
 
-        for node in self.vc_nodes:
-            dot.node(node['viewController'])
+        for node in self.controller_nodes:
+            dot.node(node['controller_name'])
+
+        edge_colors = {'relationship': 'black', 'presentation': 'blue', 'unwind': 'red'}
 
         for edge in self.segue_edges:
-            dot.edge(edge['source'], edge['destination'], color='blue', label=edge['identifier'])
-
-        for edge in self.unwind_edges:
-            dot.edge(edge['source'], edge['destination'], color='red', label=edge['identifier'])
+            edge_color = edge_colors[edge['kind']]
+            dot.edge(edge['source'], edge['destination'], color=edge_color, label=edge['identifier'])
 
         dot.format = 'png'
         #print(dot.source)
         dot.render('graphviz-out/graphviz', view=True)
         return dot.source
 
-    def collect_vc_nodes(self):
+    def collect_controller_nodes(self):
         """
-        Return nodes representing view controllers
+        Return nodes representing viewControllers and navigationControllers
         """
+
+        def vc_node(vc):
+            return { 'id': vc.attrib['id'],
+                    'controller_name': vc.attrib['customClass']}
+
+        def navc_node(nc):
+            return { 'id': nc.attrib['id'],
+                    'controller_name': 'navigationController' + '-' + nc.attrib['id']}
+
         nodes = []
         for vc in self.root.iter('viewController'):
-            nodes.append(self.vc_node(vc))
+            nodes.append(vc_node(vc))
+        for nc in self.root.iter('navigationController'):
+            nodes.append(navc_node(nc))
         return nodes
-
-    def vc_node(self, vc):
-        node = { 'id': vc.attrib['id'],
-                'viewController': vc.attrib['customClass']
-        }
-        return node
-
-    def collect_navc_nodes(self):
-        """
-        Return nodes representing navigation controllers
-        """
-        nodes = []
-        for vc in self.root.iter('navigationController'):
-            nodes.append(self.navc_node(vc))
-        return nodes
-
-    def navc_node(self, vc):
-        node = { 'id': vc.attrib['id'],
-                'viewController': 'navigationController' + '-' + vc.attrib['id']
-        }
-        return node
 
     def initial_vc_class_name(self):
         initial_vc_id = self.root.attrib['initialViewController']
-        vc_class_name_dict = {vc_node['id']: vc_node['viewController'] for vc_node in self.vc_nodes}
+        vc_class_name_dict = {vc_node['id']: vc_node['controller_name'] for vc_node in self.controller_nodes}
         return vc_class_name_dict.get(initial_vc_id, 'UNKNOWN')
 
     def collect_segue_edges(self):
         """
         Return edges representing segues
         """
-        vc_class_name_dict = {vc_node['id']: vc_node['viewController'] for vc_node in self.vc_nodes}
+
+        def relationship_segue_edge(controller_names, vc_name, segue):
+            dest_controller_id = segue.attrib['destination']
+            dest_vc_name = controller_names[dest_controller_id]
+            return { 'id': segue.attrib['id'],
+                    'source': vc_name,
+                    'destination': dest_vc_name,
+                    'identifier': 'navigation'}
+
+        def presentation_segue_edge(controller_names, vc_name, segue):
+            dest_controller_id = segue.attrib['destination']
+            dest_vc_name = controller_names[dest_controller_id]
+            return { 'id': segue.attrib['id'],
+                    'source': vc_name,
+                    'destination': dest_vc_name,
+                    'identifier': segue.attrib['identifier']}
+
+        def unwind_segue_edge(controller_names, vc_name, segue):
+            identifier = segue.attrib['identifier'] # may in 'VC'
+            identifier_full = identifier.replace('VC', 'controller_name')
+            dest_vc_name = find_nearest(identifier_full, controller_names)
+            print('***', identifier, dest_vc_name)
+            return { 'id': segue.attrib['id'],
+                    'source': vc.attrib['customClass'],
+                    'destination': dest_vc_name,
+                    'identifier': identifier}
+
+        controller_name_dict = self.controller_name_dict
         edges = []
-        for vc in self.root.iter('viewController'):
+        for vc in list (self.root.iter('viewController')) + list(self.root.iter('navigationController')):
+            vc_id = vc.attrib['id']
+            vc_name = controller_name_dict[vc_id]
             for segue in vc.iter('segue'):
-                edge = self.segue_edge(vc_class_name_dict, vc, segue)
-                if (edge):
+                edge = None
+                kind = segue.attrib['kind']
+                if kind == 'relationship':
+                    edge = relationship_segue_edge(controller_name_dict, vc_name, segue)
+                elif kind == 'presentation':
+                    edge = presentation_segue_edge(controller_name_dict, vc_name, segue)
+                elif kind == 'unwind':
+                    edge = unwind_segue_edge(controller_name_dict.values(), vc_name, segue)
+                    print('segue.attrib:', segue.attrib)
+                    print('edge:', edge)
+                if edge:
+                    edge['kind'] = kind
                     edges.append(edge)
         return edges
 
-    def segue_edge(self, vc_class_name_dict, vc, segue):
+    def segue_edge(self, controller_names, vc, segue):
         if segue.attrib['kind'] == 'presentation':
             dest_vc_id = segue.attrib['destination']
-            dest_vc_class_name = vc_class_name_dict[dest_vc_id]
+            dest_vc_class_name = controller_names[dest_vc_id]
             return { 'id': segue.attrib['id'],
                     'source': vc.attrib['customClass'],
                     'destination': dest_vc_class_name,
@@ -139,9 +165,9 @@ class StoryboardParser(object):
         """
         Return edges representing unwind segues
         """
-        vc_class_names = [vc_node['viewController'] for vc_node in self.vc_nodes]
+        vc_class_names = [vc_node['controller_name'] for vc_node in self.controller_nodes]
         edges = []
-        for vc in self.root.iter('viewController'):
+        for vc in self.root.iter('controller_name'):
             for segue in vc.iter('segue'):
                 edge = self.unwind_edge(vc_class_names, vc, segue)
                 if (edge):
@@ -151,7 +177,7 @@ class StoryboardParser(object):
     def unwind_edge(self, vc_class_names, vc, segue):
         if (segue.attrib['kind'] == 'unwind'):
             identifier = segue.attrib['identifier'] # ends in 'VC'
-            identifier_full = identifier.replace('VC', 'ViewController')
+            identifier_full = identifier.replace('VC', 'controller_name')
             dest_vc_class_name = find_nearest(identifier_full, vc_class_names)
             return { 'id': segue.attrib['id'],
                     'source': vc.attrib['customClass'],
@@ -173,24 +199,24 @@ class StoryboardParser(object):
         strs = []
         for vc in self.root.iter('navigationController'):
             strs.append(json.dumps(vc.attrib))
-            strs.append('')
             #strs.append(self.dump(vc.attrib, ['id']))
             for segue in vc.iter('segue'):
                 #     print(segue)
                 strs.append('        segue ' + self.dump(segue.attrib, ['id', 'destination', 'kind', 'identifier', 'unwindAction', 'modalPresentationStyle',  'modalTransitionStyle']))
                 #{"destination": "aZf-qq-fub", "kind": "presentation", "identifier": "toStickerShopVC", "modalPresentationStyle": "fullScreen", "modalTransitionStyle": "crossDissolve", "id": "Dde-ZG-iRW"}
+        strs.append('')
         return "\n".join(strs)
 
     def viewControllers_info(self):
         strs = []
         for vc in self.root.iter('viewController'):
             strs.append(json.dumps(vc.attrib))
-            strs.append('')
             #strs.append(self.dump(vc.attrib, ['id', 'customClass']))
             for segue in vc.iter('segue'):
                 #     print(segue)
                 strs.append('        segue ' + self.dump(segue.attrib, ['id', 'destination', 'kind', 'identifier', 'unwindAction', 'modalPresentationStyle',  'modalTransitionStyle']))
                 #{"destination": "aZf-qq-fub", "kind": "presentation", "identifier": "toStickerShopVC", "modalPresentationStyle": "fullScreen", "modalTransitionStyle": "crossDissolve", "id": "Dde-ZG-iRW"}
+        strs.append('')
         return "\n".join(strs)
 
     def segue_info(self):
@@ -208,7 +234,7 @@ class StoryboardParser(object):
         """
         nodes = []
         edges = []
-        for vc in self.root.iter('viewController'):
+        for vc in self.root.iter('controller_name'):
             nodes.append(self.any_vc_node(vc))
             for segue in vc.iter('segue'):
                 edges.append(self.any_segue_edge(vc, segue))
@@ -216,7 +242,7 @@ class StoryboardParser(object):
 
     def any_vc_node(self, vc):
         node = { 'id': vc.attrib['id'],
-                'viewController': vc.attrib['customClass']
+                'controller_name': vc.attrib['customClass']
         }
         return node
 
@@ -242,19 +268,25 @@ def print_detail_info(sb):
         for item in list:
             print(' ', item)   
 
+    def print_dict(dict_name, dict):
+        print(f'{dict_name}:')
+        for key, value in dict.items():
+            print(f'  {key}: {value}')   
+
     print('root_info:', sb.root_info())
-    print('navigationControllers_info:', sb.navigationControllers_info())
-    print('viewControllers_info:', sb.viewControllers_info())
-    print('segue_info:', sb.segue_info())
+    # print('navigationControllers_info:', sb.navigationControllers_info())
+    # print('viewControllers_info:', sb.viewControllers_info())
+    # print('segue_info:', sb.segue_info())
 
-    ne = sb.nodes_and_edges()
+    # ne = sb.nodes_and_edges()
 
-    print_list('nodes', ne['nodes'])
-    print_list('edges', ne['edges'])
+    # print_list('nodes', ne['nodes'])
+    # print_list('edges', ne['edges'])
 
-    print_list('vc_nodes', sb.vc_nodes)
+    print_list('controller_nodes', sb.controller_nodes)
+    print_dict('controller_name_dict', sb.controller_name_dict)
     print_list('segue_edges', sb.segue_edges)
-    print_list('unwind_edges', sb.unwind_edges)
+
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("filepath", type=str, default=None)
