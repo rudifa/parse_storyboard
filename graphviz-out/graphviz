@@ -1,0 +1,11 @@
+digraph storyboard {
+	node [fontname=courier fontsize=12 shape=rect]
+	edge [fontname=courier fontsize=10]
+	"" [label="sample.storyboard" shape=none]
+	"" -> "navigationController-rS3-R9-Ivy"
+	JBWDetailViewController
+	"navigationController-rS3-R9-Ivy"
+	JBWMasterViewController
+	"navigationController-rS3-R9-Ivy" -> JBWMasterViewController [label=navigation color=black]
+	JBWMasterViewController -> JBWDetailViewController [label=showDetailIdentifier color=black]
+}

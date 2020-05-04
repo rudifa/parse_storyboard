@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+#
+#  parse_storyboard.py v.0.1.1
+#  Parse an Xcode .storyboard file and generate a graphviz diagram of view controllers and segues
+#
+#  Created by Rudolf Farkas on 02.05.2020
+#  Copyright © 2020 Rudolf Farkas. All rights reserved.
 
 # references
 # https://www.datacamp.com/community/tutorials/python-xml-elementtree
@@ -14,12 +20,13 @@ from levenshtein_distance import find_nearest
 
 class StoryboardParser(object):
 
-    def __init__(self, filepath):
+    def __init__(self, filepath, plot):
         """Given a filepath to an Xcode .storyboatd file
         initialize the instance and parse the file.
         """
         self.filepath = filepath
         self.dir = re.split(r'\/', filepath)[0]
+        self.plot_digraph = plot
 
         self.tree = et.parse(filepath)
         self.root = self.tree.getroot()
@@ -49,7 +56,7 @@ class StoryboardParser(object):
         for node in self.controller_nodes:
             dot.node(node['controller_name'])
 
-        edge_colors = {'relationship': 'black', 'presentation': 'blue', 'unwind': 'red'}
+        edge_colors = {'relationship': 'black', 'push': 'black', 'presentation': 'blue', 'unwind': 'red'}
 
         for edge in self.segue_edges:
             edge_color = edge_colors[edge['kind']]
@@ -57,7 +64,7 @@ class StoryboardParser(object):
 
         dot.format = 'png'
         #print(dot.source)
-        dot.render('graphviz-out/graphviz', view=True)
+        dot.render('graphviz-out/graphviz', view=self.plot_digraph)
         return dot.source
 
     ### collect data from storyboard
@@ -84,6 +91,8 @@ class StoryboardParser(object):
             nodes.append(vc_node(vc))
         for nc in self.root.iter('navigationController'):
             nodes.append(navc_node(nc))
+        for tvc in self.root.iter('tableViewController'):
+            nodes.append(vc_node(tvc))
         return nodes
 
     def collect_segue_edges(self):
@@ -119,7 +128,9 @@ class StoryboardParser(object):
 
         controller_name_dict = self.controller_name_dict
         edges = []
-        for vc in list (self.root.iter('viewController')) + list(self.root.iter('navigationController')):
+        for vc in list(self.root.iter('viewController')) +\
+                  list(self.root.iter('navigationController')) +\
+                  list(self.root.iter('tableViewController')):
             vc_id = vc.attrib['id']
             vc_name = controller_name_dict[vc_id]
             for segue in vc.iter('segue'):
@@ -127,7 +138,7 @@ class StoryboardParser(object):
                 kind = segue.attrib['kind']
                 if kind == 'relationship':
                     edge = relationship_segue_edge(controller_name_dict, vc_name, segue)
-                elif kind == 'presentation':
+                elif kind == 'presentation' or kind == 'push':
                     edge = presentation_segue_edge(controller_name_dict, vc_name, segue)
                 elif kind == 'unwind':
                     edge = unwind_segue_edge(controller_name_dict.values(), vc_name, segue)
@@ -171,7 +182,6 @@ class StoryboardParser(object):
     def segue_info(self):
         strs = ['??']
         for segue in self.root.iter("segue"):
-            segueIdentifier = segue.get("identifier")
             #strs.append(segue.tostring())
             strs.append(json.dumps(segue.attrib))
         #return "\n".join(strs)
@@ -202,12 +212,14 @@ def print_detail_info(sb):
     print_list('segue_edges', sb.segue_edges)
 
 if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument("filepath", type=str, default=None)
+    parser = ArgumentParser(description='Analyzes an Xcode .storyboard file and generates a graphviz digraph and a plot of view controllers and segues')
+    parser.add_argument("filepath", type=str, default=None, help='an Xcode .storyboard file')
+    parser.add_argument('--no-plot', dest='plot', action='store_false', help='suppress the on-screen plot')
+    parser.set_defaults(plot=True)
     args = parser.parse_args()
     print("args.filepath=", args.filepath)
 
-    sb = StoryboardParser(args.filepath)
+    sb = StoryboardParser(args.filepath, args.plot)
     print_detail_info(sb)
     sbd = sb.digraph()
     print(sbd)
