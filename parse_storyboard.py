@@ -118,9 +118,9 @@ class StoryboardParser(object):
 
         def unwind_segue_edge(controller_names, vc_name, segue):
             identifier = segue.attrib['identifier'] # may end in 'VC'
-            identifier_full = identifier.replace('VC', 'controller_name')
+            identifier_full = identifier.replace('VC', 'ViewController')
             dest_vc_name = find_nearest(identifier_full, controller_names)
-            print('***', identifier, dest_vc_name)
+            print('***', identifier, identifier_full, dest_vc_name)
             return { 'id': segue.attrib['id'],
                     'source': vc.attrib['customClass'],
                     'destination': dest_vc_name,
