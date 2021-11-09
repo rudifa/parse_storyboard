@@ -47,8 +47,9 @@ class StoryboardParser(object):
         from graphviz import Digraph, Source
 
         dot = Digraph(name='storyboard')
-        dot.attr('node', shape='rect', fontname = 'courier', fontsize = '12')
-        dot.attr('edge', fontname = 'courier', fontsize = '10')
+        dot.attr("graph", ratio="0.5625")
+        dot.attr('node', shape='rect', fontname = 'Helvetica', fontsize = '12')
+        dot.attr('edge', fontname = 'Helvetica', fontsize = '11')
 
         dot.node('', self.dir, shape='none')
         dot.edge('', self.initial_vc_class_name())
