@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!python3
 #
 #  parse_storyboard.py v.0.1.1
 #  Parse an Xcode .storyboard file and generate a graphviz diagram of view controllers and segues
